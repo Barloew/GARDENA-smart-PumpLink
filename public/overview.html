@@ -1,0 +1,171 @@
+<!-- overview.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>PumpLink Overview</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="container py-4">
+
+    <!-- Header -->
+    <a href="/" style="text-decoration: none; color: inherit;">
+        <h1 class="mb-4">GARDENA smart PumpLink</h1>
+    </a>
+
+    <!-- Body Content -->
+    <p>Deploy GARDENA smart PumpLink on Vercel, integrate with Husqvarna Group Open APIs, and link your GARDENA smart pump and valves in just 3 steps.</p>
+
+    <!-- Progress Bar -->
+    <div class="progress mb-4">
+        <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0 of 3</div>
+    </div>
+
+    <!-- Alert and Button Containers -->
+    <div id="alert-container"></div>
+    <div id="button-container" class="mb-4"></div>
+
+    <!-- Footer -->
+    <footer class="small mt-4">
+        GARDENA smart PumpLink is not affiliated, associated, authorized, endorsed by, or in any way officially connected with Husqvarna or any of its subsidiaries or affiliates. The names Husqvarna, GARDENA, as well as related names, marks, emblems, and images are registered trademarks of their respective owners.
+    </footer>
+
+    <!-- JavaScript -->
+    <script>
+        async function checkEnvVars() {
+            try {
+                const response = await fetch('/api/setup?action=check-env-vars', { method: 'GET' });
+                const data = await response.json();
+                return data.KV_REST_API_URL && data.KV_REST_API_TOKEN; 
+            } catch (error) {
+                console.error('Error fetching environment variables:', error);
+                return false;
+            }
+        }
+
+        async function getKVValue(key) {
+            try {
+                const response = await fetch(`/api/setup?action=get-kv-value&key=${key}`, { method: 'GET' });
+                const data = await response.json();
+                return data.value;
+            } catch (error) {
+                console.error(`Error fetching KV value for key ${key}:`, error);
+                return null;
+            }
+        }
+
+        function updateProgressBar(successCount) {
+            const progressBar = document.getElementById('progress-bar');
+            const progressPercentage = (successCount / 3) * 100;
+            progressBar.style.width = `${progressPercentage}%`;
+            progressBar.setAttribute('aria-valuenow', progressPercentage);
+            progressBar.textContent = `${successCount} of 3`;
+
+            if (progressPercentage === 100) {
+                progressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+            }
+        }
+
+        function hideAllButtons() {
+            document.getElementById('button-container').innerHTML = '';
+        }
+
+        function showButton(id, text, onClickHandler) {
+            const buttonContainer = document.getElementById('button-container');
+            const button = document.createElement('button');
+            button.id = id;
+            button.className = 'btn btn-primary mb-3';
+            button.innerText = text;
+            button.style.display = 'block';
+            button.addEventListener('click', onClickHandler);
+            buttonContainer.appendChild(button);
+        }
+
+        function showAlert(type, header, message, linkText, linkHref) {
+            hideAllButtons();
+            const alertContainer = document.getElementById('alert-container');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.role = 'alert';
+            alertDiv.innerHTML = `
+                <h4 class="alert-heading">${header}</h4>
+                <p>${message} <a href="${linkHref}" class="alert-link">${linkText}</a>.</p>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            alertContainer.appendChild(alertDiv);
+
+            alertDiv.querySelector('.btn-close').addEventListener('click', () => {
+                alertContainer.removeChild(alertDiv);
+                showRelevantButtons();
+            });
+        }
+
+        async function showRelevantButtons() {
+            hideAllButtons(); 
+
+            let successCount = 0;
+
+            if (await checkEnvVars()) {
+                successCount++;
+                showButton('vercel-config-completed', 'Vercel project configuration completed', () => {
+                    showAlert('success', 'Success!', 
+                        'Your Vercel project is configured for GARDENA smart PumpLink.', 
+                        'Reconfigure Vercel project', '/vercel-setup.html');
+                });
+            } else {
+                showButton('start-vercel-config', 'Start Vercel configuration', () => {
+                    showAlert('info', 'Vercel project configuration for GARDENA smart PumpLink', 
+                        'Your Vercel project needs to be configured for GARDENA smart PumpLink.', 
+                        'Start Vercel project configuration', '/vercel-setup.html');
+                });
+                updateProgressBar(successCount);
+                return;
+            }
+
+            const registered = await getKVValue('webhookRegistered');
+            console.log("Webhook Registered:", registered);
+
+            if (registered === 'true') {
+                successCount++;
+                showButton('hmac-config-completed', 'Husqvarna Developer Portal setup and configuration completed', () => {
+                    showAlert('success', 'Success!', 
+                        'Your Husqvarna Developer Portal application is configured for GARDENA smart PumpLink.', 
+                        'Reconfigure Husqvarna Developer Portal application', '/gardena-setup.html');
+                });
+            } else {
+                showButton('configure-husqvarna', 'Configure Husqvarna Developer Portal Application', () => {
+                    showAlert('info', 'Husqvarna Developer Portal application configuration', 
+                        'Your Husqvarna Developer Portal application needs to be configured for GARDENA smart PumpLink.', 
+                        'Configure Husqvarna Developer Portal application', '/gardena-setup.html');
+                });
+                updateProgressBar(successCount);
+                return;
+            }
+
+            const pumpId = await getKVValue('gardenaPumpId');
+            if (pumpId) {
+                successCount++;
+                showButton('devices-linked', 'GARDENA smart Irrigation device linkage completed', () => {
+                    showAlert('success', 'Success!', 
+                        'GARDENA smart Irrigation devices in your garden are linked together for use with GARDENA smart PumpLink.', 
+                        'Reconfigure your GARDENA smart Irrigation devices', '/gardena-config.html');
+                });
+            } else {
+                showButton('link-devices', 'Link GARDENA smart Irrigation devices', () => {
+                    showAlert('info', 'Link together GARDENA smart Irrigation devices in your garden', 
+                        'Your GARDENA smart Irrigation devices need to be linked together.', 
+                        'Link GARDENA smart Irrigation devices together', '/gardena-config.html');
+                });
+            }
+
+            updateProgressBar(successCount); // Update progress bar based on success count
+        }
+
+        window.onload = showRelevantButtons;
+    </script>
+
+    <!-- Bootstrap JS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
