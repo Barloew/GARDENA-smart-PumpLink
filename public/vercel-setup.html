@@ -1,0 +1,214 @@
+<!-- vercel-setup.html -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Vercel Preparation</title>
+    <!-- Bootstrap CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Custom Styles -->
+    <style>
+        .text-warning {
+            color: orange;
+        }
+    </style>
+</head>
+<body class="container py-4">
+
+    <!-- Header -->
+    <h1 class="mb-4">GARDENA smart PumpLink</h1>
+
+    <!-- Instructions -->
+    <div class="instructions">
+        <p class="mb-4">Login to your <a href="https://vercel.com" target="_blank">Vercel</a> account to prepare your project for deployment of GARDENA smart PumpLink.</p>
+
+        <!-- Vercel Plan Selection -->
+        <h3>Vercel Plan</h3>
+        <p>Select your Vercel plan.</p>
+        <div class="mb-3">
+            <label for="vercelPlan" class="form-label">Vercel Plan</label>
+            <select id="vercelPlan" name="vercelPlan" class="form-select" required>
+                <option value="personal" selected>Personal (Hobby) Plan</option>
+                <option value="pro">Pro or Enterprise Plan</option>
+            </select>
+        </div>
+
+        <!-- Team ID Section -->
+        <div id="teamIdSection" class="mb-3 d-none">
+            <h3>Vercel Team ID</h3>
+            <p>In the <strong>upper-left corner</strong> of your Vercel dashboard, click on the <strong>triangle</strong>, then select <strong>Settings</strong>. Scroll down to locate your <strong>Team ID</strong>. Click the copy button and paste your Team ID here:</p>
+            <label for="vercelTeamId" class="form-label">Vercel Team ID</label>
+            <input type="text" id="vercelTeamId" name="vercelTeamId" class="form-control" placeholder="Paste your Vercel Team ID here">
+        </div>
+
+        <!-- Vercel Project Name -->
+        <h3>Vercel Project</h3>
+        <p>Please enter the exact name of your Vercel project as it appears in your Vercel dashboard (e.g., <strong>gardena-smart-pumplink</strong>).</p>
+        <div class="mb-3">
+            <label for="vercelProjectName" class="form-label">Vercel Project Name</label>
+            <input type="text" id="vercelProjectName" name="vercelProjectName" class="form-control" placeholder="Enter your Vercel Project Name here" required>
+        </div>
+
+        <!-- Vercel Access Token -->
+        <h3>Vercel Access Token</h3>
+        <p>
+            In the <strong>upper-right corner</strong> of your Vercel dashboard, click your <strong>profile picture</strong>, then select <strong>Account Settings</strong>. Select <strong>Tokens</strong> from the sidebar. Enter a descriptive name for the token (e.g., "GARDENA"), choose <strong>User (Team's) Projects</strong> as the scope.
+        </p>
+        
+        <p>Set an expiration date if desired, and click <strong>Create Token</strong>. Copy the Access Token and paste it here:</p>
+        <div class="mb-3">
+            <label for="vercelAccessToken" class="form-label">Vercel Access Token</label>
+            <input type="text" id="vercelAccessToken" name="vercelAccessToken" class="form-control" placeholder="Paste your Vercel Access Token here" required>
+        </div>
+
+        <!-- KV Snippet -->
+        <h3>Vercel Storage</h3>
+        <p>In the <strong>upper-left corner</strong> of your Vercel dashboard, click on the <strong>triangle</strong>, then select <strong>Storage</strong>. Follow the steps to <strong>create a KV Database</strong>. Under <strong>Quickstart</strong> select <strong>env.local</strong> and select <strong>Copy Snippet</strong>. Paste it here:</p>
+        <div class="mb-3">
+            <label for="kvSnippet" class="form-label">KV Database Snippet</label>
+            <textarea id="kvSnippet" name="kvSnippet" class="form-control" placeholder="Paste your env.local Snippet here" required></textarea>
+        </div>
+
+        <!-- Save Button -->
+        <button id="saveButton" class="btn btn-primary" disabled>Save</button>
+
+        <!-- Message -->
+        <div class="mt-3" id="message"></div>
+    </div>
+
+    <!-- Bootstrap JS and dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- JavaScript Code -->
+    <script>
+        function checkFormValidity() {
+            const plan = document.getElementById('vercelPlan').value;
+            const teamId = document.getElementById('vercelTeamId').value.trim();
+            const projectName = document.getElementById('vercelProjectName').value.trim();
+            const accessToken = document.getElementById('vercelAccessToken').value.trim();
+            const kvSnippet = document.getElementById('kvSnippet').value.trim();
+            const saveButton = document.getElementById('saveButton');
+
+            let isValid = projectName && accessToken && kvSnippet;
+
+            if (plan === 'pro') {
+                isValid = isValid && teamId;
+            }
+
+            saveButton.disabled = !isValid;
+        }
+
+        function handlePlanSelection() {
+            const plan = document.getElementById('vercelPlan').value;
+            const teamIdSection = document.getElementById('teamIdSection');
+            const teamIdInput = document.getElementById('vercelTeamId');
+
+            if (plan === 'pro') {
+                teamIdSection.classList.remove('d-none');
+                teamIdInput.setAttribute('required', 'required');
+            } else {
+                teamIdSection.classList.add('d-none');
+                teamIdInput.removeAttribute('required');
+                teamIdInput.value = '';
+            }
+
+            checkFormValidity();
+        }
+
+        document.querySelectorAll('input, textarea, select').forEach(input => {
+            input.addEventListener('input', checkFormValidity);
+            input.addEventListener('change', checkFormValidity);
+        });
+
+        document.getElementById('vercelPlan').addEventListener('change', handlePlanSelection);
+
+        document.getElementById('saveButton').addEventListener('click', async function() {
+            const plan = document.getElementById('vercelPlan').value;
+            const teamId = document.getElementById('vercelTeamId').value.trim();
+            const projectName = document.getElementById('vercelProjectName').value.trim();
+            const accessToken = document.getElementById('vercelAccessToken').value.trim();
+            const kvSnippet = document.getElementById('kvSnippet').value.trim();
+            const messageElement = document.getElementById('message');
+
+            try {
+                messageElement.textContent = 'Processing...';
+                messageElement.classList.remove('text-danger', 'text-warning');
+                messageElement.classList.add('text-warning');
+
+                const bodyData = {
+                    teamId: plan === 'pro' ? teamId : '',
+                    projectName,
+                    accessToken,
+                    kvSnippet,
+                };
+
+                const response = await fetch('/api/setup?action=connect-kvstore', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(bodyData)
+                });
+                const result = await response.json();
+
+                if (response.ok) {
+                    messageElement.textContent = 'Setup complete! Redeploying the project. Please wait...';
+                    messageElement.classList.remove('text-danger', 'text-warning');
+                    messageElement.classList.add('text-warning');
+
+                    // Poll for deployment status
+                    await pollDeploymentStatus(bodyData.teamId, projectName, accessToken);
+
+                    // Redirect to the next setup page
+                    window.location.href = '/';
+                } else {
+                    messageElement.textContent = `Error: ${result.error}`;
+                    messageElement.classList.add('text-danger');
+                    messageElement.classList.remove('text-warning');
+                }
+            } catch (error) {
+                messageElement.textContent = `Error: ${error.message}`;
+                messageElement.classList.add('text-danger');
+                messageElement.classList.remove('text-warning');
+            }
+        });
+
+        async function pollDeploymentStatus(teamId, projectName, accessToken) {
+            const maxRetries = 20; // Maximum number of retries
+            const delay = 15000; // Delay between retries in milliseconds (15 seconds)
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const params = new URLSearchParams();
+                    params.append('projectId', projectName);
+                    if (teamId && teamId.trim() !== '') {
+                        params.append('teamId', teamId);
+                    }
+
+                    const deploymentsResponse = await fetch(`https://api.vercel.com/v6/deployments?${params.toString()}`, {
+                        headers: {
+                            Authorization: `Bearer ${accessToken}`
+                        }
+                    });
+                    const deploymentsData = await deploymentsResponse.json();
+
+                    if (deploymentsData.deployments && deploymentsData.deployments.length > 0) {
+                        const latestDeployment = deploymentsData.deployments[0];
+                        if (latestDeployment.state === 'READY') {
+                            return; // Deployment is ready
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking deployment status:', error);
+                }
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            throw new Error('Deployment did not complete in the expected time.');
+        }
+
+        // Initial setup
+        handlePlanSelection();
+    </script>
+
+</body>
+</html>
