@@ -4,7 +4,7 @@ const { getKVValue } = require('./kvHelpers');
 
 const getProductionUrl = (req) => {
   const protocol = req.headers['x-forwarded-proto'] || 'https';
-  const host = req.headers.host || process.env.VERCEL_URL;
+  const host = req.headers.host || process.env.VERCEL_PROJECT_PRODUCTION_URL;
   return `${protocol}://${host}`;
 };
 
