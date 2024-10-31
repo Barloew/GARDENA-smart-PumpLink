@@ -1,11 +1,4 @@
 {
-  "redirects": [
-    {
-      "source": "http://(.*)",
-      "destination": "https://$1",
-      "statusCode": 308
-    }
-  ],
   "rewrites": [
     {
       "source": "/",
