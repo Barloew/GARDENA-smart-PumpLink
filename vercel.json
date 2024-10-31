@@ -10,12 +10,10 @@
     {
       "source": "/",
       "destination": "/overview.html"
-    }
-  ],
-  "routes": [
+    },
     {
-      "src": "/api/(.*)",
-      "dest": "/api/$1.js"
+      "source": "/api/(.*)",
+      "destination": "/api/$1.js"
     }
   ]
 }
