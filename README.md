@@ -1,13 +1,13 @@
 # GARDENA-smart-PumpLink
 Designed for GARDENA smart gardens with leakage issues, this project will automatically start and stop your GARDENA smart Pressure Pump based on valve activity from your select GARDENA smart Irrigation Control and/or smart Water Control devices.
 
-## Useless? Perhaps
+## The perfect smart garden
 If you **use GARDENA smart Irrigation Control and/or GARDENA smart Water Control devices in connection with a GARDENA smart Pressure Pump** and your installation is without leakage issues, then you really don't need this project. The pump's automatic flow setting should ensure that the pump starts automatically as water demand causes pressure to drop below a treshold. Reveresly, this setting will ensure that the pump stops automatically when pressure rises above a treshold.  
 
-### Consider when automatic flow setting causes unintended pump cycling
-However, in the unfortunate event that there is leakage in your piping system, the automatic flow setting can cause the pump to uncontrollably start, short cycle and/or never stop. This will force you to configure the pump to manual or scheduled switching. Consequently, you need to take extra steps to independently control your pump. If you don't like that, then this project is for you! 
+### Unintended flow
+However, in the unfortunate event that there is leakage in your piping system, the automatic flow setting can cause the pump to unintendedlly start, short cycle and/or never stop. This will force you to configure the pump to manual or scheduled switching. Consequently, you need to take extra steps to independently control your pump. If you don't like that, then this project is for you! 
 
-### Apple HomeKit users benefit more 
+### Apple HomeKit 
 If you also happen to be an Apple user, then you're given the option to control your GARDENA smart Irrigation Control and GARDENA smart Water Control devices using HomeKit. Unfortunately, HomeKit does n't give you the option to control your GARDENA smart Pressure Pump independently. So if your pump is set to manual or scheduled switching there is no way for you to control it using HomeKit. Now, if you want your pump to respond to the flipping of a HomeKit valve switch, HomeKit automation. or Siri command, this project will benefit you even more!   
 
 ### Serverless, free and secure
