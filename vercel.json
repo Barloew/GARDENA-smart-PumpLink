@@ -8,5 +8,11 @@
       "source": "/api/(.*)",
       "destination": "/api/$1.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/oauth?action=refreshAccessToken",
+      "schedule": "0 1 * * *"
+    }
   ]
 }
