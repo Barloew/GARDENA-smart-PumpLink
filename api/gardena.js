@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
 
     switch (action) {
       case 'register-webhook': {
-        const locationId = await getCachedKVValue('gardenaLocation');
+        const locationId = await getKVValue('gardenaLocation');
         const authToken = await getKVValue('gardenaAuthToken');
         const webhookUrl = getWebhookUrl(req);
         try {
@@ -107,7 +107,7 @@ module.exports = async (req, res) => {
 
       case 'get-pump-valves': {
         try {
-          const pumpsAndValvesDataString = await getCachedKVValue('gardenaPumpsAndValves');
+          const pumpsAndValvesDataString = await getKVValue('gardenaPumpsAndValves');
           if (!pumpsAndValvesDataString) {
             return res
               .status(500)
@@ -143,7 +143,7 @@ async function saveCredentials(clientID, clientSecret, req) {
 
     const redirectUrl = getRedirectUrl(req);
     const state = Math.random().toString(36).substring(2, 15);
-    const authHost = await getCachedKVValue('gardenaAuthHost');
+    const authHost = await getKVValue('gardenaAuthHost');
     const scope = 'iam:read_organization sg-integration-api:read';
     const authUrl = `${authHost}/v1/oauth2/authorize?client_id=${encodeURIComponent(
       clientID
@@ -159,9 +159,9 @@ async function saveCredentials(clientID, clientSecret, req) {
 }
 
 async function registerWebhook(locationId, authToken, webhookUrl) {
-  const SMART_HOST = await getCachedKVValue('gardenaSmartHost');
-  const clientId = await getCachedKVValue('gardenaClientId');
-  const currentHmacValidUntil = await getCachedKVValue('hmacSecretValidity'); 
+  const SMART_HOST = await getKVValue('gardenaSmartHost');
+  const clientId = await getKVValue('gardenaClientId');
+  const currentHmacValidUntil = await getKVValue('hmacSecretValidity'); 
 
   const now = new Date();
   if (currentHmacValidUntil && new Date(currentHmacValidUntil) - now > 24 * 60 * 60 * 1000) {
@@ -216,9 +216,9 @@ async function registerWebhook(locationId, authToken, webhookUrl) {
 }
 
 async function updateDeviceStates(events) {
-  const valveIdsString = await getCachedKVValue('gardenaValveIds');
+  const valveIdsString = await getKVValue('gardenaValveIds');
   const valveIds = valveIdsString ? JSON.parse(valveIdsString) : [];
-  const pumpId = await getCachedKVValue('gardenaPumpId');
+  const pumpId = await getKVValue('gardenaPumpId');
   const deviceStatesString = (await getKVValue('gardenaDeviceStates')) || '{}';
   let deviceStates = JSON.parse(deviceStatesString);
 
@@ -242,10 +242,10 @@ async function updateDeviceStates(events) {
 async function handlePumpState() {
   console.log('handlePumpState started');
 
-  const pumpId = await getCachedKVValue('gardenaPumpId');
+  const pumpId = await getKVValue('gardenaPumpId');
   console.log(`Fetched pumpId: ${pumpId}`);
 
-  const valveIdsString = await getCachedKVValue('gardenaValveIds');
+  const valveIdsString = await getKVValue('gardenaValveIds');
   const valveIds = valveIdsString ? JSON.parse(valveIdsString) : [];
   console.log(`Fetched valveIds: ${JSON.stringify(valveIds)}`);
 
@@ -286,10 +286,10 @@ async function savePumpAndValves(pumpId, valves) {
 }
 
 async function performPumpAction(actionState) {
-  const SMART_HOST = await getCachedKVValue('gardenaSmartHost');
-  const pumpId = await getCachedKVValue('gardenaPumpId');
-  const authToken = await getCachedKVValue('gardenaAuthToken');
-  const clientId = await getCachedKVValue('gardenaClientId');
+  const SMART_HOST = await getKVValue('gardenaSmartHost');
+  const pumpId = await getKVValue('gardenaPumpId');
+  const authToken = await getKVValue('gardenaAuthToken');
+  const clientId = await getKVValue('gardenaClientId');
 
   const headers = {
     Accept: 'application/vnd.api+json',
