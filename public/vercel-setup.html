@@ -1,5 +1,4 @@
 <!-- vercel-setup.html -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -55,19 +54,18 @@
         <p>
             In the <strong>upper-right corner</strong> of your Vercel dashboard, click your <strong>profile picture</strong>, then select <strong>Account Settings</strong>. Select <strong>Tokens</strong> from the sidebar. Enter a descriptive name for the token (e.g., "GARDENA"), choose <strong>User (Team's) Projects</strong> as the scope.
         </p>
-        
         <p>Set an expiration date if desired, and click <strong>Create Token</strong>. Copy the Access Token and paste it here:</p>
         <div class="mb-3">
             <label for="vercelAccessToken" class="form-label">Vercel Access Token</label>
             <input type="text" id="vercelAccessToken" name="vercelAccessToken" class="form-control" placeholder="Paste your Vercel Access Token here" required>
         </div>
 
-        <!-- KV Snippet -->
-        <h3>Vercel Storage</h3>
-        <p>In the <strong>upper-left corner</strong> of your Vercel dashboard, click on the <strong>triangle</strong>, then select <strong>Storage</strong>. Follow the steps to <strong>create a KV Database</strong>. Under <strong>Quickstart</strong> select <strong>env.local</strong> and select <strong>Copy Snippet</strong>. Paste it here:</p>
+        <!-- Upstash Snippet -->
+        <h3>Upstash Redis Storage</h3>
+        <p>In your <a href="https://console.upstash.com" target="_blank">Upstash</a> dashboard, select your Redis database, click on <strong>Access Tokens</strong> → <strong>Env Vars</strong>, choose <strong>env.local</strong> and copy the snippet. Paste it here:</p>
         <div class="mb-3">
-            <label for="kvSnippet" class="form-label">KV Database Snippet</label>
-            <textarea id="kvSnippet" name="kvSnippet" class="form-control" placeholder="Paste your env.local Snippet here" required></textarea>
+            <label for="kvSnippet" class="form-label">Upstash env.local Snippet</label>
+            <textarea id="kvSnippet" name="kvSnippet" class="form-control" placeholder="Paste your Upstash env.local snippet here" required></textarea>
         </div>
 
         <!-- Save Button -->
@@ -90,11 +88,9 @@
             const saveButton = document.getElementById('saveButton');
 
             let isValid = projectName && accessToken && kvSnippet;
-
             if (plan === 'pro') {
                 isValid = isValid && teamId;
             }
-
             saveButton.disabled = !isValid;
         }
 
@@ -111,7 +107,6 @@
                 teamIdInput.removeAttribute('required');
                 teamIdInput.value = '';
             }
-
             checkFormValidity();
         }
 
@@ -119,7 +114,6 @@
             input.addEventListener('input', checkFormValidity);
             input.addEventListener('change', checkFormValidity);
         });
-
         document.getElementById('vercelPlan').addEventListener('change', handlePlanSelection);
 
         document.getElementById('saveButton').addEventListener('click', async function() {
@@ -132,7 +126,7 @@
 
             try {
                 messageElement.textContent = 'Processing...';
-                messageElement.classList.remove('text-danger', 'text-warning');
+                messageElement.classList.remove('text-danger');
                 messageElement.classList.add('text-warning');
 
                 const bodyData = {
@@ -144,22 +138,17 @@
 
                 const response = await fetch('/api/setup?action=connect-kvstore', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(bodyData)
                 });
                 const result = await response.json();
 
                 if (response.ok) {
                     messageElement.textContent = 'Setup complete! Redeploying the project. Please wait...';
-                    messageElement.classList.remove('text-danger', 'text-warning');
+                    messageElement.classList.remove('text-danger');
                     messageElement.classList.add('text-warning');
 
-                    // Poll for deployment status
                     await pollDeploymentStatus(bodyData.teamId, projectName, accessToken);
-
-                    // Redirect to the next setup page
                     window.location.href = '/';
                 } else {
                     messageElement.textContent = `Error: ${result.error}`;
@@ -174,34 +163,24 @@
         });
 
         async function pollDeploymentStatus(teamId, projectName, accessToken) {
-            const maxRetries = 20; // Maximum number of retries
-            const delay = 15000; // Delay between retries in milliseconds (15 seconds)
-
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const maxRetries = 20;
+            const delay = 15000;
+            for (let i = 0; i < maxRetries; i++) {
                 try {
-                    const params = new URLSearchParams();
-                    params.append('projectId', projectName);
-                    if (teamId && teamId.trim() !== '') {
-                        params.append('teamId', teamId);
-                    }
+                    const params = new URLSearchParams({ projectId: projectName });
+                    if (teamId) params.append('teamId', teamId);
 
-                    const deploymentsResponse = await fetch(`https://api.vercel.com/v6/deployments?${params.toString()}`, {
-                        headers: {
-                            Authorization: `Bearer ${accessToken}`
-                        }
+                    const resp = await fetch(`https://api.vercel.com/v6/deployments?${params}`, {
+                        headers: { Authorization: `Bearer ${accessToken}` }
                     });
-                    const deploymentsData = await deploymentsResponse.json();
-
-                    if (deploymentsData.deployments && deploymentsData.deployments.length > 0) {
-                        const latestDeployment = deploymentsData.deployments[0];
-                        if (latestDeployment.state === 'READY') {
-                            return; // Deployment is ready
-                        }
+                    const data = await resp.json();
+                    if (data.deployments?.[0]?.state === 'READY') {
+                        return;
                     }
-                } catch (error) {
-                    console.error('Error checking deployment status:', error);
+                } catch (e) {
+                    console.error('Error checking deployment status:', e);
                 }
-                await new Promise(resolve => setTimeout(resolve, delay));
+                await new Promise(r => setTimeout(r, delay));
             }
             throw new Error('Deployment did not complete in the expected time.');
         }
