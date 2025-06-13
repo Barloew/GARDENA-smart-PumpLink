@@ -1,12 +1,20 @@
 // api/setup.js
+// Updated to parse your Upstash env.local snippet and provision all vars (including read-only token, Redis URLs, etc.)
 
-const { connectKVStore, parseConfigSnippet, getKVValue: getKVValueWrapper } = require('./kvHelpers');
 const axios = require('axios');
+const {
+  connectKVStore,
+  parseConfigSnippet,
+  getKVValue: getKVValueWrapper
+} = require('./kvHelpers');
 
 module.exports = async (req, res) => {
   const { action, key } = req.query;
 
-  if (req.method !== 'POST' && action !== 'check-env-vars' && action !== 'get-kv-value') {
+  if (req.method !== 'POST'
+      && action !== 'check-env-vars'
+      && action !== 'get-kv-value'
+  ) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
@@ -14,167 +22,150 @@ module.exports = async (req, res) => {
     switch (action) {
       case 'connect-kvstore': {
         const { teamId, projectName, accessToken, kvSnippet } = req.body;
-
-        if (!projectName || !accessToken || !kvSnippet) {
-          const missingFields = [];
-          if (!projectName) missingFields.push('Vercel Project Name');
-          if (!accessToken) missingFields.push('Vercel Access Token');
-          if (!kvSnippet) missingFields.push('Gardena KV Snippet');
-          return res.status(400).json({ error: `The following fields are required: ${missingFields.join(', ')}` });
+        const missing = [];
+        if (!projectName) missing.push('Vercel Project Name');
+        if (!accessToken) missing.push('Vercel Access Token');
+        if (!kvSnippet) missing.push('Upstash Env Snippet');
+        if (missing.length) {
+          return res.status(400).json({ error: `The following fields are required: ${missing.join(', ')}` });
         }
 
         try {
+          // write into your Upstash KV first
           await connectKVStore(teamId, projectName, accessToken, kvSnippet);
 
+          // parse all five env vars from the snippet
           const config = parseConfigSnippet(kvSnippet);
-          const kvUrl = config.KV_REST_API_URL;
-          const kvToken = config.KV_REST_API_TOKEN;
 
-          if (!kvUrl || !kvToken) {
-            throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN are required in the KV Snippet.');
-          }
+          // provision them into Vercel
+          await setEnvironmentVariables(teamId, projectName, accessToken, config);
 
-          await setEnvironmentVariables(teamId, projectName, accessToken, kvUrl, kvToken);
+          // finally trigger a redeployment
           await triggerRedeployment(teamId, projectName, accessToken);
 
-          return res.status(200).json({ message: 'KV Store connected, credentials saved, and redeployment triggered.' });
-        } catch (error) {
-          console.error('Error in connect-kvstore:', error);
-          return res.status(500).json({ error: `Failed to connect KV Store: ${error.message}` });
+          return res.status(200).json({
+            message: 'KV Store connected, credentials saved, and redeployment triggered.'
+          });
+        } catch (err) {
+          console.error('Error in connect-kvstore:', err);
+          return res.status(500).json({ error: `Failed to connect KV Store: ${err.message}` });
         }
       }
 
       case 'check-env-vars': {
-        const kvUrl = process.env.KV_REST_API_URL;
-        const kvToken = process.env.KV_REST_API_TOKEN;
-
-        return res.status(200).json({
-          KV_REST_API_URL: Boolean(kvUrl),
-          KV_REST_API_TOKEN: Boolean(kvToken),
-        });
+        const vars = {
+          KV_REST_API_URL: Boolean(process.env.KV_REST_API_URL),
+          KV_REST_API_TOKEN: Boolean(process.env.KV_REST_API_TOKEN),
+          KV_REST_API_READ_ONLY_TOKEN: Boolean(process.env.KV_REST_API_READ_ONLY_TOKEN),
+          REDIS_URL: Boolean(process.env.REDIS_URL),
+          KV_URL: Boolean(process.env.KV_URL),
+        };
+        return res.status(200).json(vars);
       }
 
       case 'get-kv-value': {
         if (!key) {
           return res.status(400).json({ error: 'Key is required to retrieve a KV value.' });
         }
-
         try {
           const value = await getKVValueWrapper(key);
           return res.status(200).json({ value });
-        } catch (error) {
-          console.error(`Error retrieving KV value for key ${key}:`, error);
-          return res.status(500).json({ error: `Failed to retrieve KV value: ${error.message}` });
+        } catch (err) {
+          console.error(`Error retrieving KV value for key ${key}:`, err);
+          return res.status(500).json({ error: `Failed to retrieve KV value: ${err.message}` });
         }
       }
 
       default:
         return res.status(400).json({ error: 'Invalid action.' });
     }
-  } catch (error) {
-    console.error('General error:', error);
-    return res.status(500).json({ error: `Failed to perform setup: ${error.message}` });
+  } catch (err) {
+    console.error('General error:', err);
+    return res.status(500).json({ error: `Failed to perform setup: ${err.message}` });
   }
 };
 
-async function setEnvironmentVariables(teamId, projectName, accessToken, kvUrl, kvToken) {
+/**
+ * Dynamically upserts every key→value from the parsed snippet into Vercel env.
+ */
+async function setEnvironmentVariables(teamId, projectName, accessToken, config) {
   try {
     const params = {};
-    if (teamId && teamId.trim() !== '') {
-      params.teamId = teamId;
-    }
+    if (teamId) params.teamId = teamId;
 
-    const url = `https://api.vercel.com/v9/projects/${projectName}/env`;
+    const baseUrl = `https://api.vercel.com/v9/projects/${projectName}/env`;
 
-    const envVars = [
-      { key: 'KV_REST_API_URL', value: kvUrl },
-      { key: 'KV_REST_API_TOKEN', value: kvToken },
-    ];
-
-    for (const { key, value } of envVars) {
-      const envVarExists = await axios.get(url, {
+    for (const [key, value] of Object.entries(config)) {
+      if (!value) continue;
+      // check existing
+      const listResp = await axios.get(baseUrl, {
         headers: { Authorization: `Bearer ${accessToken}` },
-        params,
+        params
       });
+      const existing = listResp.data.envs.find(e => e.key === key);
 
-      const existingEnvVar = envVarExists.data.envs.find((env) => env.key === key);
-
-      if (existingEnvVar) {
+      if (existing) {
+        // patch
         await axios.patch(
-          `${url}/${existingEnvVar.id}`,
+          `${baseUrl}/${existing.id}`,
           { value, target: ['production'] },
           { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
         );
       } else {
+        // create new
         await axios.post(
-          url,
+          baseUrl,
           { key, value, target: ['production'] },
           { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
         );
       }
     }
     console.log('Environment variables updated successfully.');
-  } catch (error) {
-    console.error('Error setting environment variables:', error.response?.data || error.message);
-    throw new Error('Failed to set environment variables: ' + (error.response?.data?.error?.message || error.message));
+  } catch (err) {
+    console.error('Error setting environment variables:', err.response?.data || err.message);
+    throw new Error('Failed to set environment variables: ' + (err.response?.data?.error?.message || err.message));
   }
 }
 
 async function triggerRedeployment(teamId, projectName, accessToken) {
   try {
     const params = {};
-    if (teamId && teamId.trim() !== '') {
-      params.teamId = teamId;
-    }
+    if (teamId) params.teamId = teamId;
 
-    const projectApiUrl = `https://api.vercel.com/v9/projects/${projectName}`;
-    const projectResponse = await axios.get(projectApiUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
+    // fetch project info
+    const proj = await axios.get(
+      `https://api.vercel.com/v9/projects/${projectName}`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, params }
+    ).then(r => r.data);
+
+    if (!proj.link?.type || !proj.link?.repoId) {
+      throw new Error('Project is not linked to a Git repository.');
+    }
+    const branch = proj.link.org?.defaultBranch || 'main';
+
+    // trigger
+    await axios.post(
+      `https://api.vercel.com/v13/deployments`,
+      {
+        name: projectName,
+        target: 'production',
+        gitSource: {
+          type: proj.link.type,
+          repoId: proj.link.repoId,
+          ref: branch,
+        },
       },
-      params,
-    });
-
-    const projectData = projectResponse.data;
-
-    if (!projectData.link || !projectData.link.type) {
-      throw new Error('The project is not linked to a Git repository.');
-    }
-
-    const repoId = projectData.link.repoId;
-    const gitProvider = projectData.link.type;
-    const gitBranch = projectData.link.org.defaultBranch || 'main';
-
-    if (!repoId || !gitProvider || !gitBranch) {
-      throw new Error('Failed to retrieve Git details from project data.');
-    }
-
-    const deploymentApiUrl = `https://api.vercel.com/v13/deployments`;
-    const requestBody = {
-      name: projectName,
-      target: 'production',
-      gitSource: {
-        type: gitProvider,
-        repoId: repoId,
-        ref: gitBranch,
-      },
-    };
-
-    const deploymentResponse = await axios.post(
-      deploymentApiUrl,
-      requestBody,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
-        params,
+        params
       }
     );
-
-    console.log('Redeployment triggered successfully:', deploymentResponse.data);
-  } catch (error) {
-    console.error('Error triggering redeployment:', error.response?.data || error.message);
-    throw new Error('Failed to trigger redeployment: ' + (error.response?.data?.error?.message || error.message));
+    console.log('Redeployment triggered successfully.');
+  } catch (err) {
+    console.error('Error triggering redeployment:', err.response?.data || err.message);
+    throw new Error('Failed to trigger redeployment: ' + (err.response?.data?.error?.message || err.message));
   }
 }
