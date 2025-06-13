@@ -1,131 +1,140 @@
 // api/kvHelpers.js
+// Updated to use Upstash REST API URL + both read-only and write tokens
 
 const axios = require('axios');
 
-const createKVClient = (kvUrl, kvToken) => {
-  if (!kvUrl || !kvToken) {
-    throw new Error('KV URL and Token must be provided to create a KV client.');
+let defaultKVClient = null;
+
+/**
+ * @param {string} kvUrl                   REST endpoint, e.g. https://...upstash.io
+ * @param {string} readOnlyToken           Upstash read-only token
+ * @param {string} writeToken              Upstash write token
+ */
+const createKVClient = (kvUrl, readOnlyToken, writeToken) => {
+  if (!kvUrl || !readOnlyToken || !writeToken) {
+    throw new Error('KV URL, read-only token and write token must be provided.');
   }
 
   const setKVValue = async (key, value, options = {}) => {
-    let data;
-    let headers = { Authorization: `Bearer ${kvToken}` };
-
-    if (typeof value === 'object' && value !== null) {
-      data = JSON.stringify(value);
-      headers['Content-Type'] = 'application/json';
-    } else {
-      data = value.toString(); 
-      headers['Content-Type'] = 'text/plain';
-    }
-
+    const data = (typeof value === 'object' && value !== null)
+      ? JSON.stringify(value)
+      : value.toString();
+    const headers = {
+      Authorization: `Bearer ${writeToken}`,
+      'Content-Type': typeof value === 'object' ? 'application/json' : 'text/plain'
+    };
     const params = new URLSearchParams();
     if (options.expirationTtl) {
       params.append('expiration_ttl', options.expirationTtl);
     }
+    const url = options.expirationTtl
+      ? `${kvUrl}/set/${encodeURIComponent(key)}?${params}`
+      : `${kvUrl}/set/${encodeURIComponent(key)}`;
 
     try {
-      const url = options.expirationTtl
-        ? `${kvUrl}/set/${encodeURIComponent(key)}?${params.toString()}`
-        : `${kvUrl}/set/${encodeURIComponent(key)}`;
-
       await axios.post(url, data, { headers });
       console.log(`KV Store: ${key} set successfully`);
-    } catch (error) {
-      console.error(
-        `Error setting KV Store value for ${key}:`,
-        error.response?.data || error.message
-      );
-      throw error;
+    } catch (err) {
+      console.error(`Error setting KV value for ${key}:`, err.response?.data || err.message);
+      throw err;
     }
   };
 
   const getKVValue = async (key) => {
     try {
-      const response = await axios.get(`${kvUrl}/get/${encodeURIComponent(key)}`, {
-        headers: { Authorization: `Bearer ${kvToken}` },
+      const resp = await axios.get(`${kvUrl}/get/${encodeURIComponent(key)}`, {
+        headers: { Authorization: `Bearer ${readOnlyToken}` }
       });
-
-      if (response.status === 200 && response.data !== undefined) {
-        const data = response.data.result;
-        console.log(`KV Store: Retrieved key=${key}, data=${data}`);
-        return data;
-      } else {
+      if (resp.status === 200 && resp.data?.result !== undefined) {
+        console.log(`KV Store: Retrieved ${key}`);
+        return resp.data.result;
+      }
+      console.warn(`KV Store: ${key} not found.`);
+      return null;
+    } catch (err) {
+      if (err.response?.status === 404) {
         console.warn(`KV Store: ${key} not found.`);
         return null;
       }
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        console.warn(`KV Store: ${key} not found.`);
-        return null;
-      }
-      console.error(
-        `Error retrieving KV Store value for ${key}:`,
-        error.response?.data || error.message
-      );
-      throw error;
+      console.error(`Error retrieving KV value for ${key}:`, err.response?.data || err.message);
+      throw err;
     }
   };
 
   return { setKVValue, getKVValue };
 };
 
-let defaultKVClient = null;
-
+/**
+ * Builds (and caches) a client using your Vercel env vars:
+ *   KV_REST_API_URL,
+ *   KV_REST_API_TOKEN,
+ *   KV_REST_API_READ_ONLY_TOKEN
+ */
 const getDefaultKVClient = async () => {
-  const kvUrl = process.env.KV_REST_API_URL || process.env.INITIAL_KV_REST_API_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN || process.env.INITIAL_KV_REST_API_TOKEN;
+  if (defaultKVClient) return defaultKVClient;
 
-  if (!kvUrl || !kvToken) {
-    throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN must be set as environment variables.');
+  const kvUrl = process.env.KV_REST_API_URL
+    || process.env.INITIAL_KV_REST_API_URL;
+  const writeToken = process.env.KV_REST_API_TOKEN
+    || process.env.INITIAL_KV_REST_API_TOKEN;
+  const readOnlyToken = process.env.KV_REST_API_READ_ONLY_TOKEN
+    || writeToken;
+
+  if (!kvUrl || !writeToken) {
+    throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN must be set in env.');
   }
 
-  defaultKVClient = createKVClient(kvUrl, kvToken);
+  defaultKVClient = createKVClient(kvUrl, readOnlyToken, writeToken);
   return defaultKVClient;
 };
 
 const setKVValueWrapper = async (key, value, options = {}) => {
-  const kvClient = await getDefaultKVClient();
-  return kvClient.setKVValue(key, value, options);
+  const client = await getDefaultKVClient();
+  return client.setKVValue(key, value, options);
 };
 
 const getKVValueWrapper = async (key) => {
-  const kvClient = await getDefaultKVClient();
-  return kvClient.getKVValue(key);
+  const client = await getDefaultKVClient();
+  return client.getKVValue(key);
 };
 
 const parseConfigSnippet = (snippet) => {
-  const lines = snippet.split('\n');
-  const config = {};
-
-  lines.forEach((line) => {
-    const [key, value] = line.split('=');
-    if (key && value) {
-      config[key.trim()] = value.trim().replace(/"/g, '');
-    }
-  });
-
-  return config;
+  return snippet
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && line.includes('='))
+    .reduce((cfg, line) => {
+      const [k, ...rest] = line.split('=');
+      cfg[k.trim()] = rest.join('=').replace(/(^")|("$)/g, '');
+      return cfg;
+    }, {});
 };
 
+/**
+ * Stores your Vercel/Upstash credentials inside the Upstash KV itself
+ * so the setup API can write once and the runtime can always read back.
+ */
 const connectKVStore = async (teamId, projectName, accessToken, kvSnippet) => {
   const config = parseConfigSnippet(kvSnippet);
-
   const kvUrl = config.KV_REST_API_URL;
-  const kvToken = config.KV_REST_API_TOKEN;
+  const writeToken = config.KV_REST_API_TOKEN;
+  const readOnlyToken = config.KV_REST_API_READ_ONLY_TOKEN || writeToken;
 
-  if (!kvUrl || !kvToken) {
-    throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN are required in the KV Snippet.');
+  if (!kvUrl || !writeToken) {
+    throw new Error('KV_REST_API_URL and KV_REST_API_TOKEN are required.');
   }
 
-  const customKVClient = createKVClient(kvUrl, kvToken);
+  const client = createKVClient(kvUrl, readOnlyToken, writeToken);
 
-  await customKVClient.setKVValue('Vercel_Team_ID', teamId && teamId.trim() !== '' ? teamId : '');
-  await customKVClient.setKVValue('Vercel_Project_Name', projectName);
-  await customKVClient.setKVValue('Vercel_Access_Token', accessToken);
+  // store your Vercel connection metadata
+  await client.setKVValue('Vercel_Team_ID', teamId || '');
+  await client.setKVValue('Vercel_Project_Name', projectName);
+  await client.setKVValue('Vercel_Access_Token', accessToken);
 
-  await customKVClient.setKVValue('KV_REST_API_URL', kvUrl);
-  await customKVClient.setKVValue('KV_REST_API_TOKEN', kvToken);
+  // store the full snippet so the runtime can re-provision if needed
+  for (const [k, v] of Object.entries(config)) {
+    await client.setKVValue(k, v);
+  }
 
   return 'KV Store connected and credentials saved successfully.';
 };
