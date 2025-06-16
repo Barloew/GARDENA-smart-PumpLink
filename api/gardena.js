@@ -69,7 +69,19 @@ module.exports = async (req, res) => {
         }
       }
 
-      $1
+      case 'save-credentials': {
+        const { clientID, clientSecret } = body;
+        if (!clientID || !clientSecret) {
+          return res.status(400).json({ error: 'Missing clientID or clientSecret' });
+        }
+        try {
+          const authUrl = await saveCredentials(clientID, clientSecret, req);
+          return res.status(200).json({ authUrl });
+        } catch (error) {
+          console.error('Error in save-credentials:', error.message);
+          return res.status(500).json({ error: `Failed to save credentials: ${error.message}` });
+        }
+      }
 
       case 'get-saved-pump-and-valves': {
         try {
@@ -81,22 +93,11 @@ module.exports = async (req, res) => {
           console.error('Error in get-saved-pump-and-valves:', error.message);
           return res.status(500).json({ error: error.message });
         }
-      } = body;
-        if (!clientID || !clientSecret) {
-          return res.status(400).json({ error: 'Missing clientID or clientSecret' });
-        }
-        try {
-          const authUrl = await saveCredentials(clientID, clientSecret, req);
-          return res.status(200).json({ authUrl });
-        } catch (error) {
-          console.error('Error in saveCredentials:', error.message);
-          return res.status(500).json({ error: `Failed to save credentials: ${error.message}` });
-        }
       }
 
       case 'get-pump-valves': {
         try {
-          // fetch live v2 location data including all services
+          // live v2 location fetch, grouping by device
           const [authToken, SMART_HOST, CLIENT_ID, locationId] = await Promise.all([
             getCachedKVValue('gardenaAuthToken'),
             getCachedKVValue('gardenaSmartHost'),
@@ -104,70 +105,48 @@ module.exports = async (req, res) => {
             getCachedKVValue('gardenaLocation')
           ]);
           if (!authToken || !SMART_HOST || !CLIENT_ID || !locationId) {
-            throw new Error('Missing Gardena credentials or location');
+            throw new Error('Missing credentials or location');
           }
-
           const headers = {
             Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/vnd.api+json',
             'X-Api-Key': CLIENT_ID
           };
-
-          // GET /v2/locations/{locationId} returns included array with COMMON, VALVE, POWER_SOCKET, VALVE_SET, SENSOR, etc.
           const resp = await axios.get(
             `${SMART_HOST}/v2/locations/${locationId}`,
             { headers }
           );
-
           if (resp.status !== 200 || !Array.isArray(resp.data.included)) {
-            throw new Error('Failed to fetch Gardena location data');
+            throw new Error('Failed to fetch location data');
           }
-
           const included = resp.data.included;
-
-          // group services by device id and pull out COMMON info
           const devices = {};
           included.forEach(item => {
             const did = item.relationships?.device?.data?.id;
             if (!did) return;
-            if (!devices[did]) devices[did] = { id: did, common: null, services: [] };
-            if (item.type === 'COMMON') {
-              devices[did].common = item;
-            } else {
-              devices[did].services.push(item);
-            }
+            devices[did] = devices[did] || { id: did, common: null, services: [] };
+            if (item.type === 'COMMON') devices[did].common = item;
+            else devices[did].services.push(item);
           });
-
           const pumps = [];
           const valves = [];
-
           Object.values(devices).forEach(device => {
             const { id, common, services } = device;
             if (!common) return;
             const name = common.attributes.name.value;
             const modelType = common.attributes.modelType.value;
-
-            // pump: any device whose COMMON.modelType contains 'pump'
-            if (/pump/i.test(modelType)) {
-              pumps.push({ id, name });
-            }
-
-            // valves:
+            if (/pump/i.test(modelType)) pumps.push({ id, name });
             if (modelType === 'GARDENA smart Water Control') {
               valves.push({ id, name, modelType });
             } else if (modelType === 'GARDENA smart Irrigation Control') {
-              // find sub-valves in services array
-              const sub = services
-                .filter(s => s.type === 'VALVE')
-                .map(s => ({
-                  id: s.id,
-                  name: s.attributes.name.value,
-                  isUnavailable: s.attributes.activity.value === 'UNAVAILABLE'
-                }));
+              const sub = services.filter(s => s.type === 'VALVE').map(s => ({
+                id: s.id,
+                name: s.attributes.name.value,
+                isUnavailable: s.attributes.activity?.value === 'UNAVAILABLE'
+              }));
               valves.push({ id, name, modelType, valves: sub });
             }
           });
-
           return res.status(200).json({ pumps, valves });
         } catch (error) {
           console.error('Error in get-pump-valves:', error.message);
@@ -184,7 +163,7 @@ module.exports = async (req, res) => {
   }
 };
 
-// helper functions unchanged below
+// Helper functions below
 async function saveCredentials(clientID, clientSecret, req) {
   await setKVValue('gardenaClientId', clientID.toString());
   await setKVValue('gardenaClientSecret', clientSecret.toString());
@@ -218,7 +197,7 @@ async function updateDeviceStates(events) {
   events.forEach(({id, attributes}) => {
     if ([...valveIds, pumpId].includes(id)) {
       states[id] = states[id]||{};
-      Object.entries(attributes).forEach(([k,v])=>states[id][k]={value:v.value,timestamp:v.timestamp});
+      Object.entries(attributes).forEach(([k,v])=>states[id][k] = { value: v.value, timestamp: v.timestamp });
     }
   });
   await setKVValue('gardenaDeviceStates', JSON.stringify(states));
@@ -228,11 +207,11 @@ async function handlePumpState() {
   const pumpId = await getCachedKVValue('gardenaPumpId');
   const valveIds = JSON.parse((await getCachedKVValue('gardenaValveIds'))||'[]');
   const states = JSON.parse((await getKVValue('gardenaDeviceStates'))||'{}');
-  const isWatering = valveIds.some(id=>{
-    const act=states[id]?.activity?.value;
-    return act==='MANUAL_WATERING'||act==='SCHEDULED_WATERING';
+  const isWatering = valveIds.some(id => {
+    const act = states[id]?.activity?.value;
+    return act === 'MANUAL_WATERING' || act === 'SCHEDULED_WATERING';
   });
-  await performPumpAction(isWatering?'open':'closed');
+  await performPumpAction(isWatering ? 'open' : 'closed');
 }
 
 async function savePumpAndValves(pumpId, valves) {
@@ -243,12 +222,12 @@ async function savePumpAndValves(pumpId, valves) {
 async function performPumpAction(actionState) {
   const SMART_HOST = await getCachedKVValue('gardenaSmartHost');
   const pumpId = await getCachedKVValue('gardenaPumpId');
-  const authToken=await getCachedKVValue('gardenaAuthToken');
-  const clientId=await getCachedKVValue('gardenaClientId');
-  const headers={Accept:'application/vnd.api+json',Authorization:`Bearer ${authToken}`,'X-Api-Key':clientId,'Content-Type':'application/vnd.api+json'};
-  const data={data:{type:'VALVE_CONTROL',id:'request-by-script',attributes:{command:actionState==='open'?'START_SECONDS_TO_OVERRIDE':'STOP_UNTIL_NEXT_TASK',...(actionState==='open'&&{seconds:3600})}}};
-  const response=await axios.put(`${SMART_HOST}/v1/command/${pumpId}`,data,{headers});
-  if(response.status!==202) throw new Error(`Pump action failed: ${response.status}`);
+  const authToken = await getCachedKVValue('gardenaAuthToken');
+  const clientId = await getCachedKVValue('gardenaClientId');
+  const headers = { Accept: 'application/vnd.api+json', Authorization: `Bearer ${authToken}`, 'X-Api-Key': clientId, 'Content-Type': 'application/vnd.api+json' };
+  const data = { data: { type: 'VALVE_CONTROL', id: 'request-by-script', attributes: { command: actionState === 'open' ? 'START_SECONDS_TO_OVERRIDE' : 'STOP_UNTIL_NEXT_TASK', ...(actionState === 'open' && { seconds: 3600 }) } } };
+  const response = await axios.put(`${SMART_HOST}/v1/command/${pumpId}`, data, { headers });
+  if (response.status !== 202) throw new Error(`Pump action failed: ${response.status}`);
 }
 
 module.exports.updateDeviceStates = updateDeviceStates;
