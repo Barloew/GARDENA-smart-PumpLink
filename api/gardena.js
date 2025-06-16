@@ -12,6 +12,17 @@ const logMessage = (message) => {
 };
 
 module.exports = async (req, res) => {
+  // Log all incoming requests to this API for debugging
+  console.log(`${new Date().toISOString()} - [Gardena API] ${req.method} ${req.url} query=${JSON.stringify(req.query)}`);
+  if (['POST','PUT'].includes(req.method) && req.body) {
+    console.log(`${new Date().toISOString()} - [Gardena API body]`, req.body);
+  }
+  try {
+  // Log every invocation to see webhook or other calls
+  console.log(`${new Date().toISOString()} - [Gardena API] ${req.method} ${req.url} query=${JSON.stringify(req.query)}`);
+  if (['POST','PUT'].includes(req.method) && req.body) {
+    console.log(`${new Date().toISOString()} - [Gardena API body]`, req.body);
+  }
   try {
     const { action } = req.query;
     let body = {};
