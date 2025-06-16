@@ -85,62 +85,12 @@ module.exports = async (req, res) => {
 
       case 'get-pump-valves': {
         try {
-          // fetch live devices and services via v2
-          const [authToken, SMART_HOST, CLIENT_ID, locationId] = await Promise.all([
-            getKVValue('gardenaAuthToken'),
-            getKVValue('gardenaSmartHost'),
-            getKVValue('gardenaClientId'),
-            getKVValue('gardenaLocation')
-          ]);
-          if (!authToken || !SMART_HOST || !CLIENT_ID || !locationId) {
-            throw new Error('Missing Gardena credentials or location');
+          const dataString = await getCachedKVValue('gardenaPumpsAndValves');
+          if (!dataString) {
+            return res.status(500).json({ error: 'Gardena pumps and valves info not available' });
           }
-
-          const headers = {
-            Authorization: `Bearer ${authToken}`,
-            'Content-Type': 'application/vnd.api+json',
-            'X-Api-Key': CLIENT_ID
-          };
-          // fetch devices with included services
-          const resp = await axios.get(
-            `${SMART_HOST}/v2/locations/${locationId}/devices?include=services`,
-            { headers }
-          );
-          const included = Array.isArray(resp.data.included) ? resp.data.included : [];
-
-          // group services by device
-          const devices = {};
-          included.forEach(item => {
-            const did = item.relationships?.device?.data?.id;
-            if (!did) return;
-            devices[did] = devices[did] || { id: did, services: {} };
-            devices[did].services[item.type] = item;
-          });
-
-          const pumps = [];
-          const valves = [];
-          // build lists
-          Object.values(devices).forEach(device => {
-            const { id, services } = device;
-            const common = services.COMMON;
-            if (!common) return;
-            const name = common.attributes.name.value;
-            const modelType = common.attributes.modelType.value;
-            // pump detection: VALVE service and modelType contains pump
-            if (services.VALVE && /pump/i.test(modelType)) {
-              pumps.push({ id, name });
-            }
-            // simple valves
-            if (modelType === 'GARDENA smart Water Control') {
-              valves.push({ id, name, modelType });
-            } else if (modelType === 'GARDENA smart Irrigation Control') {
-              const sub = included
-                .filter(i => i.type === 'VALVE' && i.relationships.device.data.id === id && !/pump/i.test(modelType))
-                .map(i => ({ id: i.id, name: i.attributes.name.value, isUnavailable: i.attributes.activity?.value === 'UNAVAILABLE' }));
-              valves.push({ id, name, modelType, valves: sub });
-            }
-          });
-          return res.status(200).json({ pumps, valves });
+          const data = JSON.parse(dataString);
+          return res.status(200).json(data);
         } catch (error) {
           console.error('Error in get-pump-valves:', error.message);
           return res.status(500).json({ error: error.message });
@@ -219,7 +169,7 @@ async function performPumpAction(actionState) {
   const clientId=await getCachedKVValue('gardenaClientId');
   const headers={Accept:'application/vnd.api+json',Authorization:`Bearer ${authToken}`,'X-Api-Key':clientId,'Content-Type':'application/vnd.api+json'};
   const data={data:{type:'VALVE_CONTROL',id:'request-by-script',attributes:{command:actionState==='open'?'START_SECONDS_TO_OVERRIDE':'STOP_UNTIL_NEXT_TASK',...(actionState==='open'&&{seconds:3600})}}};
-  const response=await axios.put(`${SMART_HOST}/v2/command/${pumpId}`,data,{headers});
+  const response=await axios.put(`${SMART_HOST}/v1/command/${pumpId}`,data,{headers});
   if(response.status!==202) throw new Error(`Pump action failed: ${response.status}`);
 }
 
