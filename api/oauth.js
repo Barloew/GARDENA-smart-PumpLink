@@ -7,7 +7,14 @@ const logMessage = (message) => {
   console.log(`${new Date().toISOString()} - ${message}`);
 };
 
+// Core handler for /api/oauth
 async function oauthHandler(req, res) {
+  // Log every invocation with method, URL, and query params
+  console.log(`${new Date().toISOString()} - [OAuth] ${req.method} ${req.url} query=${JSON.stringify(req.query)}`);
+  if (['POST', 'PUT'].includes(req.method) && req.body) {
+    console.log(`${new Date().toISOString()} - [OAuth body]`, req.body);
+  }
+
   const { action } = req.query;
 
   try {
