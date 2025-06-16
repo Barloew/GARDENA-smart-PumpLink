@@ -46,115 +46,123 @@
     <script>
         let selectedPump = null;
         const selectedValves = new Set();
-        const mainValveToSubValves = {}; 
+        const mainValveToSubValves = {};
 
-        fetch('/api/gardena?action=get-pump-valves')
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
+        // Fetch available devices
+        Promise.all([
+            fetch('/api/gardena?action=get-pump-valves').then(r => r.json()),
+            fetch('/api/gardena?action=get-saved-pump-and-valves').then(r => r.json())
+        ]).then(([data, saved]) => {
+            if (data.error) throw new Error(data.error);
+            const { pumps, valves } = data;
 
-                const pumps = data.pumps || [];
-                const valves = data.valves || [];
+            // Render pumps
+            const pumpList = document.getElementById('pump-list');
+            if (!pumps.length) {
+                pumpList.innerHTML = '<li class="list-group-item">No pumps found.</li>';
+            } else {
+                pumps.forEach(pump => {
+                    const li = document.createElement('li');
+                    li.classList.add('list-group-item');
+                    li.innerHTML = `
+                        <div class="form-check form-switch">
+                            <input class="form-check-input pump-switch" type="checkbox" data-id="${pump.id}" id="pump-${pump.id}">
+                            <label class="form-check-label" for="pump-${pump.id}">${pump.name}</label>
+                        </div>
+                    `;
+                    pumpList.appendChild(li);
+                });
+            }
 
-                if (pumps.length === 0) {
-                    document.getElementById('pump-list').innerHTML = '<li class="list-group-item">No pumps found.</li>';
-                } else {
-                    const pumpList = document.getElementById('pump-list');
-                    pumps.forEach(pump => {
+            // Render valves
+            const valveList = document.getElementById('valve-list');
+            if (!valves.length) {
+                valveList.innerHTML = '<li class="list-group-item">No valves found.</li>';
+            } else {
+                valves.forEach(valve => {
+                    if (valve.modelType === 'GARDENA smart Water Control') {
                         const li = document.createElement('li');
                         li.classList.add('list-group-item');
                         li.innerHTML = `
                             <div class="form-check form-switch">
-                                <input class="form-check-input pump-switch" type="checkbox" data-id="${pump.id}" id="pump-${pump.id}">
-                                <label class="form-check-label" for="pump-${pump.id}">${pump.name}</label>
+                                <input class="form-check-input valve-switch" type="checkbox" data-id="${valve.id}" id="valve-${valve.id}">
+                                <label class="form-check-label" for="valve-${valve.id}">${valve.name}</label>
                             </div>
                         `;
-                        pumpList.appendChild(li);
-                    });
+                        valveList.appendChild(li);
+                    } else if (valve.modelType === 'GARDENA smart Irrigation Control') {
+                        const headerLi = document.createElement('li');
+                        headerLi.classList.add('list-group-item');
+                        headerLi.innerHTML = `
+                            <div class="form-check form-switch">
+                                <input class="form-check-input main-valve-switch" type="checkbox" data-id="${valve.id}" id="main-valve-${valve.id}">
+                                <label class="form-check-label" for="main-valve-${valve.id}">${valve.name}</label>
+                            </div>
+                        `;
+                        valveList.appendChild(headerLi);
 
-                    document.querySelectorAll('.pump-switch').forEach(input => {
-                        input.addEventListener('change', handlePumpSelection);
-                    });
+                        const subUl = document.createElement('ul');
+                        mainValveToSubValves[valve.id] = [];
+                        valve.valves.forEach(subValve => {
+                            const subLi = document.createElement('li');
+                            subLi.innerHTML = subValve.isUnavailable ?
+                                `<div class="form-check form-switch" style="margin-left: 40px;">
+                                    <input class="form-check-input" type="checkbox" disabled>
+                                    <label class="form-check-label" style="color: gray;">${subValve.name}</label>
+                                </div>` :
+                                `<div class="form-check form-switch" style="margin-left: 40px;">
+                                    <input class="form-check-input valve-switch" type="checkbox" data-id="${subValve.id}" data-parent-id="${valve.id}" id="valve-${subValve.id}">
+                                    <label class="form-check-label" for="valve-${subValve.id}">${subValve.name}</label>
+                                </div>`;
+                            if (!subValve.isUnavailable) mainValveToSubValves[valve.id].push(subValve.id);
+                            subUl.appendChild(subLi);
+                        });
+                        valveList.appendChild(subUl);
+                    }
+                });
+            }
+
+            // Attach event handlers
+            document.querySelectorAll('.pump-switch').forEach(input => input.addEventListener('change', handlePumpSelection));
+            document.querySelectorAll('.valve-switch').forEach(input => input.addEventListener('change', handleValveSelection));
+            document.querySelectorAll('.main-valve-switch').forEach(input => input.addEventListener('change', handleMainValveSelection));
+
+            // Pre-select saved
+            if (saved && saved.pumpId) {
+                const pumpInput = document.querySelector(`.pump-switch[data-id="${saved.pumpId}"]`);
+                if (pumpInput) {
+                    pumpInput.checked = true;
+                    selectedPump = saved.pumpId;
                 }
+            }
+            if (saved && Array.isArray(saved.valves)) {
+                saved.valves.forEach(vId => {
+                    const vInput = document.querySelector(`.valve-switch[data-id="${vId}"]`);
+                    if (vInput) {
+                        vInput.checked = true;
+                        selectedValves.add(vId);
+                    }
+                });
+                // sync main toggles
+                Object.keys(mainValveToSubValves).forEach(mainId => {
+                    const sub = mainValveToSubValves[mainId];
+                    const all = sub.every(id => selectedValves.has(id));
+                    const mainInput = document.querySelector(`.main-valve-switch[data-id="${mainId}"]`);
+                    if (mainInput) mainInput.checked = all;
+                });
+            }
 
-                if (valves.length === 0) {
-                    document.getElementById('valve-list').innerHTML = '<li class="list-group-item">No valves found.</li>';
-                } else {
-                    const valveList = document.getElementById('valve-list');
-                    valves.forEach(valve => {
-                        if (valve.modelType === 'GARDENA smart Water Control') {
-                            const li = document.createElement('li');
-                            li.classList.add('list-group-item');
-                            li.innerHTML = `
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input valve-switch" type="checkbox" data-id="${valve.id}" id="valve-${valve.id}">
-                                    <label class="form-check-label" for="valve-${valve.id}">${valve.name}</label>
-                                </div>
-                            `;
-                            valveList.appendChild(li);
-                        } else if (valve.modelType === 'GARDENA smart Irrigation Control') {
-                            const headerLi = document.createElement('li');
-                            headerLi.classList.add('list-group-item');
-                            headerLi.innerHTML = `
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input main-valve-switch" type="checkbox" data-id="${valve.id}" id="main-valve-${valve.id}">
-                                    <label class="form-check-label" for="main-valve-${valve.id}">${valve.name}</label>
-                                </div>
-                            `;
-                            valveList.appendChild(headerLi);
-
-                            const subUl = document.createElement('ul');
-                            mainValveToSubValves[valve.id] = []; 
-                            valve.valves.forEach(subValve => {
-                                const subLi = document.createElement('li');
-                                if (subValve.isUnavailable) {
-                                    subLi.innerHTML = `
-                                        <div class="form-check form-switch" style="margin-left: 40px;">
-                                            <input class="form-check-input" type="checkbox" id="valve-${subValve.id}" disabled>
-                                            <label class="form-check-label" for="valve-${subValve.id}" style="color: gray;">${subValve.name}</label>
-                                        </div>
-                                    `;
-                                } else {
-                                    subLi.innerHTML = `
-                                        <div class="form-check form-switch" style="margin-left: 40px;">
-                                            <input class="form-check-input valve-switch" type="checkbox" data-id="${subValve.id}" data-parent-id="${valve.id}" id="valve-${subValve.id}">
-                                            <label class="form-check-label" for="valve-${subValve.id}">${subValve.name}</label>
-                                        </div>
-                                    `;
-                                    mainValveToSubValves[valve.id].push(subValve.id);
-                                }
-                                subUl.appendChild(subLi);
-                            });
-                            valveList.appendChild(subUl);
-                        }
-                    });
-
-                    document.querySelectorAll('.valve-switch').forEach(input => {
-                        input.addEventListener('change', handleValveSelection);
-                    });
-
-                    document.querySelectorAll('.main-valve-switch').forEach(input => {
-                        input.addEventListener('change', handleMainValveSelection);
-                    });
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching devices:', error);
-                document.getElementById('error-message').textContent = 'There was an error loading the devices. Please try again later.';
-                document.getElementById('error-message').classList.remove('hidden');
-            });
+            checkConfirmButtonVisibility();
+        }).catch(error => {
+            console.error('Error loading devices or saved config:', error);
+            document.getElementById('error-message').textContent = 'Error loading configuration. Please try again.';
+            document.getElementById('error-message').classList.remove('hidden');
+        });
 
         function handlePumpSelection(event) {
             if (event.target.checked) {
                 selectedPump = event.target.dataset.id;
-
-                document.querySelectorAll('.pump-switch').forEach(input => {
-                    if (input.dataset.id !== selectedPump) {
-                        input.checked = false;
-                    }
-                });
+                document.querySelectorAll('.pump-switch').forEach(inp => { if (inp !== event.target) inp.checked = false; });
             } else {
                 selectedPump = null;
             }
@@ -162,91 +170,55 @@
         }
 
         function handleMainValveSelection(event) {
-            const mainValveId = event.target.dataset.id;
+            const mainId = event.target.dataset.id;
             const isChecked = event.target.checked;
-            const subValveIds = mainValveToSubValves[mainValveId] || [];
-
-            subValveIds.forEach(subValveId => {
-                const subValveInput = document.querySelector(`.valve-switch[data-id="${subValveId}"]`);
-                if (subValveInput) {
-                    subValveInput.checked = isChecked;
-                    if (isChecked) {
-                        selectedValves.add(subValveId);
-                    } else {
-                        selectedValves.delete(subValveId);
-                    }
+            mainValveToSubValves[mainId].forEach(subId => {
+                const subInput = document.querySelector(`.valve-switch[data-id="${subId}"]`);
+                if (subInput) {
+                    subInput.checked = isChecked;
+                    isChecked ? selectedValves.add(subId) : selectedValves.delete(subId);
                 }
             });
-
             checkConfirmButtonVisibility();
         }
 
         function handleValveSelection(event) {
-            const selectedValveId = event.target.dataset.id;
-            const parentId = event.target.dataset.parentId;
-            if (event.target.checked) {
-                selectedValves.add(selectedValveId);
-            } else {
-                selectedValves.delete(selectedValveId);
+            const vid = event.target.dataset.id;
+            const parent = event.target.dataset.parentId;
+            event.target.checked ? selectedValves.add(vid) : selectedValves.delete(vid);
+            if (parent) {
+                const all = mainValveToSubValves[parent].every(id => selectedValves.has(id));
+                const mainInput = document.querySelector(`.main-valve-switch[data-id="${parent}"]`);
+                if (mainInput) mainInput.checked = all;
             }
-
-            if (parentId) {
-                const subValveIds = mainValveToSubValves[parentId] || [];
-                const allSelected = subValveIds.every(id => selectedValves.has(id));
-                const mainValveInput = document.querySelector(`.main-valve-switch[data-id="${parentId}"]`);
-                if (mainValveInput) {
-                    mainValveInput.checked = allSelected;
-                }
-            }
-
             checkConfirmButtonVisibility();
         }
 
         function checkConfirmButtonVisibility() {
-            const confirmButton = document.getElementById('confirm-button');
+            const btn = document.getElementById('confirm-button');
             if (selectedPump && selectedValves.size > 0) {
-                confirmButton.classList.remove('hidden');
-                confirmButton.disabled = false;
+                btn.classList.remove('hidden'); btn.disabled = false;
             } else {
-                confirmButton.classList.add('hidden');
-                confirmButton.disabled = true;
+                btn.classList.add('hidden'); btn.disabled = true;
             }
         }
 
         document.getElementById('confirm-button').addEventListener('click', () => {
-            const valvesArray = Array.from(selectedValves);
-
             fetch('/api/gardena?action=save-pump-and-valves', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    pumpId: selectedPump,
-                    valves: valvesArray
-                })
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ pumpId: selectedPump, valves: Array.from(selectedValves) })
             })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-                return fetch('/api/gardena?action=register-webhook', {
-                    method: 'POST',
-                });
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    throw new Error(data.error);
-                }
+            .then(r => r.json())
+            .then(() => fetch('/api/gardena?action=register-webhook', { method: 'POST' }))
+            .then(r => r.json())
+            .then(() => {
                 document.getElementById('confirm-message').classList.remove('hidden');
-                setTimeout(() => {
-                    window.location.href = '/'; 
-                }, 2000);
+                setTimeout(()=>window.location.href='/',2000);
             })
-            .catch(error => {
-                console.error('Error:', error);
-                document.getElementById('error-message').textContent = 'There was an error saving your configuration. Please try again.';
-                document.getElementById('error-message').classList.remove('hidden');
+            .catch(err => {
+                console.error('Error saving config:', err);
+                const em = document.getElementById('error-message');
+                em.textContent = 'Error saving configuration'; em.classList.remove('hidden');
             });
         });
     </script>
