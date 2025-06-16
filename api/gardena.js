@@ -85,12 +85,79 @@ module.exports = async (req, res) => {
 
       case 'get-pump-valves': {
         try {
-          const dataString = await getCachedKVValue('gardenaPumpsAndValves');
-          if (!dataString) {
-            return res.status(500).json({ error: 'Gardena pumps and valves info not available' });
+          // fetch live v2 location data including all services
+          const [authToken, SMART_HOST, CLIENT_ID, locationId] = await Promise.all([
+            getCachedKVValue('gardenaAuthToken'),
+            getCachedKVValue('gardenaSmartHost'),
+            getCachedKVValue('gardenaClientId'),
+            getCachedKVValue('gardenaLocation')
+          ]);
+          if (!authToken || !SMART_HOST || !CLIENT_ID || !locationId) {
+            throw new Error('Missing Gardena credentials or location');
           }
-          const data = JSON.parse(dataString);
-          return res.status(200).json(data);
+
+          const headers = {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/vnd.api+json',
+            'X-Api-Key': CLIENT_ID
+          };
+
+          // GET /v2/locations/{locationId} returns included array with COMMON, VALVE, POWER_SOCKET, VALVE_SET, SENSOR, etc.
+          const resp = await axios.get(
+            `${SMART_HOST}/v2/locations/${locationId}`,
+            { headers }
+          );
+
+          if (resp.status !== 200 || !Array.isArray(resp.data.included)) {
+            throw new Error('Failed to fetch Gardena location data');
+          }
+
+          const included = resp.data.included;
+
+          // group services by device id and pull out COMMON info
+          const devices = {};
+          included.forEach(item => {
+            const did = item.relationships?.device?.data?.id;
+            if (!did) return;
+            if (!devices[did]) devices[did] = { id: did, common: null, services: [] };
+            if (item.type === 'COMMON') {
+              devices[did].common = item;
+            } else {
+              devices[did].services.push(item);
+            }
+          });
+
+          const pumps = [];
+          const valves = [];
+
+          Object.values(devices).forEach(device => {
+            const { id, common, services } = device;
+            if (!common) return;
+            const name = common.attributes.name.value;
+            const modelType = common.attributes.modelType.value;
+
+            // pump: any device whose COMMON.modelType contains 'pump'
+            if (/pump/i.test(modelType)) {
+              pumps.push({ id, name });
+            }
+
+            // valves:
+            if (modelType === 'GARDENA smart Water Control') {
+              valves.push({ id, name, modelType });
+            } else if (modelType === 'GARDENA smart Irrigation Control') {
+              // find sub-valves in services array
+              const sub = services
+                .filter(s => s.type === 'VALVE')
+                .map(s => ({
+                  id: s.id,
+                  name: s.attributes.name.value,
+                  isUnavailable: s.attributes.activity.value === 'UNAVAILABLE'
+                }));
+              valves.push({ id, name, modelType, valves: sub });
+            }
+          });
+
+          return res.status(200).json({ pumps, valves });
         } catch (error) {
           console.error('Error in get-pump-valves:', error.message);
           return res.status(500).json({ error: error.message });
