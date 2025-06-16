@@ -69,8 +69,19 @@ module.exports = async (req, res) => {
         }
       }
 
-      case 'save-credentials': {
-        const { clientID, clientSecret } = body;
+      $1
+
+      case 'get-saved-pump-and-valves': {
+        try {
+          const pumpId = await getCachedKVValue('gardenaPumpId');
+          const valvesStr = await getCachedKVValue('gardenaValveIds');
+          const valves = valvesStr ? JSON.parse(valvesStr) : [];
+          return res.status(200).json({ pumpId, valves });
+        } catch (error) {
+          console.error('Error in get-saved-pump-and-valves:', error.message);
+          return res.status(500).json({ error: error.message });
+        }
+      } = body;
         if (!clientID || !clientSecret) {
           return res.status(400).json({ error: 'Missing clientID or clientSecret' });
         }
