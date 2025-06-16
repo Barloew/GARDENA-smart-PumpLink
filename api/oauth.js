@@ -1,9 +1,7 @@
-// api/oauth.js
-
+//api/oauth.js
 const axios = require('axios');
 const { setKVValue, getKVValue } = require('./kvHelpers');
 const { getRedirectUrl } = require('./vercelUtils');
-const { getCachedKVValue } = require('./kvCache');
 
 const logMessage = (message) => {
   console.log(`${new Date().toISOString()} - ${message}`);
@@ -75,7 +73,7 @@ async function checkAndRefreshToken() {
 
   const currentTime = Date.now();
   const expiresInMs = parseInt(expiresAt, 10) - currentTime;
-  const sixtyMinutesInMs = 60 * 60 * 1000; // 60 minutes in milliseconds
+  const sixtyMinutesInMs = 60 * 60 * 1000;
 
   if (expiresInMs < sixtyMinutesInMs) {
     console.log('Token will expire soon. Refreshing token.');
@@ -86,16 +84,16 @@ async function checkAndRefreshToken() {
 }
 
 async function getAccessTokenByCode(code, redirectUrl) {
-  const AUTH_HOST = await getKVValue('gardenaAuthHost');
-  const CLIENT_ID = await getKVValue('gardenaClientId');
+  const AUTH_HOST     = await getKVValue('gardenaAuthHost');
+  const CLIENT_ID     = await getKVValue('gardenaClientId');
   const CLIENT_SECRET = await getKVValue('gardenaClientSecret');
 
   const params = new URLSearchParams({
-    grant_type: 'authorization_code',
+    grant_type:    'authorization_code',
     code,
-    client_id: CLIENT_ID,
+    client_id:     CLIENT_ID,
     client_secret: CLIENT_SECRET,
-    redirect_uri: redirectUrl,
+    redirect_uri:  redirectUrl,
   });
 
   try {
@@ -113,8 +111,8 @@ async function getAccessTokenByCode(code, redirectUrl) {
 }
 
 async function refreshAccessToken() {
-  const AUTH_HOST = await getKVValue('gardenaAuthHost');
-  const CLIENT_ID = await getKVValue('gardenaClientId');
+  const AUTH_HOST    = await getKVValue('gardenaAuthHost');
+  const CLIENT_ID    = await getKVValue('gardenaClientId');
   const REFRESH_TOKEN = await getKVValue('gardenaRefreshToken');
 
   if (!AUTH_HOST || !CLIENT_ID || !REFRESH_TOKEN) {
@@ -122,8 +120,8 @@ async function refreshAccessToken() {
   }
 
   const params = new URLSearchParams({
-    grant_type: 'refresh_token',
-    client_id: CLIENT_ID,
+    grant_type:    'refresh_token',
+    client_id:     CLIENT_ID,
     refresh_token: REFRESH_TOKEN,
   });
 
@@ -143,10 +141,7 @@ async function refreshAccessToken() {
     console.log('Token refreshed and stored successfully.');
     return data.access_token;
   } catch (error) {
-    console.error(
-      'Failed to refresh token:',
-      error.response?.data || error.message
-    );
+    console.error('Failed to refresh token:', error.response?.data || error.message);
     throw new Error(`Failed to refresh token: ${error.response?.data || error.message}`);
   }
 }
@@ -154,9 +149,11 @@ async function refreshAccessToken() {
 async function storeAccessToken(data) {
   const { access_token, refresh_token, expires_in, user_id } = data;
   const expires_at = Date.now() + expires_in * 1000;
+
   await setKVValue('gardenaAuthToken', access_token);
   await setKVValue('gardenaRefreshToken', refresh_token);
   await setKVValue('gardenaAuthTokenExpiresAt', expires_at.toString());
+
   if (user_id) {
     await setKVValue('gardenaUserId', user_id);
   }
@@ -165,19 +162,20 @@ async function storeAccessToken(data) {
   await setKVValue('gardenaLocation', locationId);
   console.log('Access token and location ID stored successfully.');
 
+  // Fetch and store garden details (pumps & valves) using v2 API
   await getGardenInfo();
 }
 
 async function getLocationId(accessToken) {
   const SMART_HOST = await getKVValue('gardenaSmartHost');
-  const CLIENT_ID = await getKVValue('gardenaClientId');
+  const CLIENT_ID  = await getKVValue('gardenaClientId');
 
   try {
     const response = await axios.get(`${SMART_HOST}/v1/locations`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/vnd.api+json',
-        'X-Api-Key': CLIENT_ID,
+        'Content-Type':    'application/vnd.api+json',
+        'X-Api-Key':        CLIENT_ID,
       },
     });
 
@@ -194,49 +192,43 @@ async function getLocationId(accessToken) {
 }
 
 async function getGardenInfo() {
-  const authToken = await getKVValue('gardenaAuthToken');
+  const authToken  = await getKVValue('gardenaAuthToken');
   const locationId = await getKVValue('gardenaLocation');
   const SMART_HOST = await getKVValue('gardenaSmartHost');
-  const CLIENT_ID = await getKVValue('gardenaClientId');
+  const CLIENT_ID  = await getKVValue('gardenaClientId');
 
   if (!authToken || !locationId || !SMART_HOST) {
     throw new Error('Missing required Gardena credentials in KV store');
   }
 
-  try {
-    const response = await axios.get(`${SMART_HOST}/v1/locations/${locationId}`, {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-        'Content-Type': 'application/vnd.api+json',
-        'X-Api-Key': CLIENT_ID,
-      },
-    });
+  const headers = {
+    Authorization: `Bearer ${authToken}`,
+    'Content-Type':    'application/vnd.api+json',
+    'X-Api-Key':        CLIENT_ID,
+  };
 
-    if (response.status !== 200) {
-      throw new Error('Failed to retrieve Garden Info');
-    }
+  const resp = await axios.get(
+    `${SMART_HOST}/v2/locations/${locationId}`,
+    { headers }
+  );
 
-    const gardenInfo = response.data;
-
-    const pumpsAndValvesDataString = JSON.stringify(pumpsAndValvesData);
-    console.log(`Size of data being stored: ${pumpsAndValvesDataString.length} bytes`);
-    await setKVValue('gardenaPumpsAndValves', pumpsAndValvesDataString);
-
-    console.log('Pumps and valves data fetched and stored successfully.');
-
-    return pumpsAndValvesData;
-  } catch (error) {
-    const errorData = {
-      message: error.message,
-      stack: error.stack,
-      responseData: error.response?.data,
-      status: error.response?.status,
-      headers: error.response?.headers,
-    };
-    console.error('Error fetching garden info:', JSON.stringify(errorData, null, 2));
-    throw new Error(`Error fetching garden info: ${error.message}`);
+  if (resp.status !== 200 || !resp.data || !Array.isArray(resp.data.included)) {
+    throw new Error('Failed to retrieve Garden Info or unexpected payload shape');
   }
+
+  // Filter out only the pumps & valves services
+  const pumpsAndValvesData = resp.data.included.filter(item =>
+    ['VALVE', 'VALVE_SET', 'POWER_SOCKET'].includes(item.type)
+  );
+
+  const serialized = JSON.stringify(pumpsAndValvesData);
+  console.log(`Storing ${serialized.length} bytes of pumps & valves data`);
+  await setKVValue('gardenaPumpsAndValves', serialized);
+
+  console.log('Pumps and valves data fetched and stored successfully.');
+  return pumpsAndValvesData;
 }
 
 module.exports = oauthHandler;
 module.exports.checkAndRefreshToken = checkAndRefreshToken;
+
