@@ -189,7 +189,7 @@ async function registerWebhook(locationId, authToken, webhookUrl) {
 
   try {
     console.log('Registering webhook with payload:', JSON.stringify(webhookPayload, null, 2));
-    const response = await axios.post(`${SMART_HOST}/v1/webhook`, webhookPayload, {
+    const response = await axios.post(`${SMART_HOST}/v2/webhook`, webhookPayload, {
       headers,
     });
     if (response.status !== 201 && response.status !== 200)
