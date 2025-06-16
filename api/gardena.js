@@ -88,7 +88,7 @@ module.exports = async (req, res) => {
           // fetch live devices and services via v2
           const [authToken, SMART_HOST, CLIENT_ID, locationId] = await Promise.all([
             getKVValue('gardenaAuthToken'),
-            getKvValue('gardenaSmartHost'),
+            getKVValue('gardenaSmartHost'),
             getKVValue('gardenaClientId'),
             getKVValue('gardenaLocation')
           ]);
@@ -219,7 +219,7 @@ async function performPumpAction(actionState) {
   const clientId=await getCachedKVValue('gardenaClientId');
   const headers={Accept:'application/vnd.api+json',Authorization:`Bearer ${authToken}`,'X-Api-Key':clientId,'Content-Type':'application/vnd.api+json'};
   const data={data:{type:'VALVE_CONTROL',id:'request-by-script',attributes:{command:actionState==='open'?'START_SECONDS_TO_OVERRIDE':'STOP_UNTIL_NEXT_TASK',...(actionState==='open'&&{seconds:3600})}}};
-  const response=await axios.put(`${SMART_HOST}/v1/command/${pumpId}`,data,{headers});
+  const response=await axios.put(`${SMART_HOST}/v2/command/${pumpId}`,data,{headers});
   if(response.status!==202) throw new Error(`Pump action failed: ${response.status}`);
 }
 
