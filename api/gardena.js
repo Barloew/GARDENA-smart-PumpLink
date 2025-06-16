@@ -17,12 +17,7 @@ module.exports = async (req, res) => {
   if (['POST','PUT'].includes(req.method) && req.body) {
     console.log(`${new Date().toISOString()} - [Gardena API body]`, req.body);
   }
-  try {
-  // Log every invocation to see webhook or other calls
-  console.log(`${new Date().toISOString()} - [Gardena API] ${req.method} ${req.url} query=${JSON.stringify(req.query)}`);
-  if (['POST','PUT'].includes(req.method) && req.body) {
-    console.log(`${new Date().toISOString()} - [Gardena API body]`, req.body);
-  }
+
   try {
     const { action } = req.query;
     let body = {};
@@ -108,7 +103,6 @@ module.exports = async (req, res) => {
 
       case 'get-pump-valves': {
         try {
-          // live v2 location fetch, grouping by device
           const [authToken, SMART_HOST, CLIENT_ID, locationId] = await Promise.all([
             getCachedKVValue('gardenaAuthToken'),
             getCachedKVValue('gardenaSmartHost'),
@@ -118,27 +112,30 @@ module.exports = async (req, res) => {
           if (!authToken || !SMART_HOST || !CLIENT_ID || !locationId) {
             throw new Error('Missing credentials or location');
           }
+
           const headers = {
             Authorization: `Bearer ${authToken}`,
             'Content-Type': 'application/vnd.api+json',
             'X-Api-Key': CLIENT_ID
           };
-          const resp = await axios.get(
-            `${SMART_HOST}/v2/locations/${locationId}`,
-            { headers }
-          );
+          const resp = await axios.get(`${SMART_HOST}/v2/locations/${locationId}`, { headers });
           if (resp.status !== 200 || !Array.isArray(resp.data.included)) {
             throw new Error('Failed to fetch location data');
           }
+
           const included = resp.data.included;
           const devices = {};
           included.forEach(item => {
             const did = item.relationships?.device?.data?.id;
             if (!did) return;
             devices[did] = devices[did] || { id: did, common: null, services: [] };
-            if (item.type === 'COMMON') devices[did].common = item;
-            else devices[did].services.push(item);
+            if (item.type === 'COMMON') {
+              devices[did].common = item;
+            } else {
+              devices[did].services.push(item);
+            }
           });
+
           const pumps = [];
           const valves = [];
           Object.values(devices).forEach(device => {
@@ -146,7 +143,10 @@ module.exports = async (req, res) => {
             if (!common) return;
             const name = common.attributes.name.value;
             const modelType = common.attributes.modelType.value;
-            if (/pump/i.test(modelType)) pumps.push({ id, name });
+
+            if (/pump/i.test(modelType)) {
+              pumps.push({ id, name });
+            }
             if (modelType === 'GARDENA smart Water Control') {
               valves.push({ id, name, modelType });
             } else if (modelType === 'GARDENA smart Irrigation Control') {
@@ -158,6 +158,7 @@ module.exports = async (req, res) => {
               valves.push({ id, name, modelType, valves: sub });
             }
           });
+
           return res.status(200).json({ pumps, valves });
         } catch (error) {
           console.error('Error in get-pump-valves:', error.message);
@@ -243,3 +244,4 @@ async function performPumpAction(actionState) {
 
 module.exports.updateDeviceStates = updateDeviceStates;
 module.exports.handlePumpState = handlePumpState;
+
