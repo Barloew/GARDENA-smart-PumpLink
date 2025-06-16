@@ -89,7 +89,6 @@ module.exports = async (req, res) => {
 
       case 'save-credentials': {
         const { clientID, clientSecret } = body;
-
         if (!clientID || !clientSecret) {
           return res.status(400).json({ error: 'Missing clientID or clientSecret' });
         }
@@ -97,7 +96,6 @@ module.exports = async (req, res) => {
           const authUrl = await saveCredentials(clientID, clientSecret, req);
           console.log('Returning authUrl to frontend:', authUrl);
           res.status(200).json({ authUrl });
-          console.log('Response sent successfully for save-credentials');
         } catch (error) {
           console.error('Error in saveCredentials:', error);
           res.status(500).json({ error: `Failed to save credentials: ${error.message}` });
@@ -107,32 +105,96 @@ module.exports = async (req, res) => {
 
       case 'get-pump-valves': {
         try {
-          const pumpsAndValvesDataString = await getKVValue('gardenaPumpsAndValves');
-          if (!pumpsAndValvesDataString) {
-            return res
-              .status(500)
-              .json({ error: 'Garden pumps and valves information not available' });
+          // load creds & location
+          const [authToken, SMART_HOST, CLIENT_ID, locationId] = await Promise.all([
+            getKVValue('gardenaAuthToken'),
+            getKVValue('gardenaSmartHost'),
+            getKVValue('gardenaClientId'),
+            getKVValue('gardenaLocation')
+          ]);
+
+          if (!authToken || !SMART_HOST || !CLIENT_ID || !locationId) {
+            throw new Error('Missing Gardena credentials or location');
           }
 
-          const pumpsAndValvesData = JSON.parse(pumpsAndValvesDataString);
+          // 1) Fetch v2 locations/{id} with included services
+          const headers = {
+            Authorization: `Bearer ${authToken}`,
+            'Content-Type': 'application/vnd.api+json',
+            'X-Api-Key': CLIENT_ID
+          };
+          const resp = await axios.get(
+            `${SMART_HOST}/v2/locations/${locationId}`,
+            { headers }
+          );
 
-          // Return the data directly
-          res.status(200).json(pumpsAndValvesData);
-        } catch (error) {
-          console.error('Error in get-pump-valves:', error);
-          res.status(500).json({ error: `Failed to get pumps and valves: ${error.message}` });
+          if (resp.status !== 200 || !Array.isArray(resp.data.included)) {
+            throw new Error('Unexpected payload from Gardena API');
+          }
+
+          const included = resp.data.included;
+
+          // 2) Group by device ID
+          const devices = {};
+          included.forEach(item => {
+            const did = item.relationships.device.data.id;
+            if (!devices[did]) devices[did] = { id: did, services: {} };
+            devices[did].services[item.type] = item;
+          });
+
+          // 3) Build pumps & valves lists
+          const pumps = [];
+          const valves = [];
+
+          Object.values(devices).forEach(device => {
+            const { id, services } = device;
+            const common = services.COMMON;
+            if (!common) return;
+
+            const name      = common.attributes.name.value;
+            const modelType = common.attributes.modelType.value;
+
+            //— pumps are devices with a POWER_SOCKET service
+            if (services.POWER_SOCKET) {
+              pumps.push({ id, name });
+            }
+
+            //— valves: either Water Control or Irrigation Control
+            if (modelType === 'GARDENA smart Water Control') {
+              valves.push({ id, name, modelType });
+            }
+            else if (modelType === 'GARDENA smart Irrigation Control') {
+              // sub-valves = all VALVE services on the same device
+              const sub = included
+                .filter(i =>
+                  i.type === 'VALVE' &&
+                  i.relationships.device.data.id === id
+                )
+                .map(i => ({
+                  id:            i.id,
+                  name:          i.attributes.name.value,
+                  isUnavailable: i.attributes.activity.value === 'UNAVAILABLE'
+                }));
+              valves.push({ id, name, modelType, valves: sub });
+            }
+          });
+
+          return res.status(200).json({ pumps, valves });
         }
-        break;
+        catch (error) {
+          console.error('Error in get-pump-valves:', error);
+          return res.status(500).json({ error: error.message });
+        }
       }
 
       default:
         res.status(400).json({ error: 'Invalid action.' });
-    } 
+    }
   } catch (error) {
     logMessage(`Unhandled error in api/gardena: ${error.message}`);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
-}; 
+};
 
 async function saveCredentials(clientID, clientSecret, req) {
   try {
@@ -161,7 +223,7 @@ async function saveCredentials(clientID, clientSecret, req) {
 async function registerWebhook(locationId, authToken, webhookUrl) {
   const SMART_HOST = await getKVValue('gardenaSmartHost');
   const clientId = await getKVValue('gardenaClientId');
-  const currentHmacValidUntil = await getKVValue('hmacSecretValidity'); 
+  const currentHmacValidUntil = await getKVValue('hmacSecretValidity');
 
   const now = new Date();
   if (currentHmacValidUntil && new Date(currentHmacValidUntil) - now > 24 * 60 * 60 * 1000) {
@@ -172,7 +234,7 @@ async function registerWebhook(locationId, authToken, webhookUrl) {
   const headers = {
     Accept: 'application/vnd.api+json',
     Authorization: `Bearer ${authToken}`,
-    'x-api-key': clientId,  
+    'x-api-key': clientId,
     'Content-Type': 'application/vnd.api+json',
   };
 
@@ -189,12 +251,8 @@ async function registerWebhook(locationId, authToken, webhookUrl) {
 
   try {
     console.log('Registering webhook with payload:', JSON.stringify(webhookPayload, null, 2));
-    const response = await axios.post(`${SMART_HOST}/v2/webhook`, webhookPayload, {
-      headers,
-    });
-    if (response.status !== 201 && response.status !== 200)
-      throw new Error('Failed to register webhook');
-    console.log('Webhook registered successfully. Response:', response.data);
+    const response = await axios.post(`${SMART_HOST}/v2/webhook`, webhookPayload, { headers });
+    if (![200, 201].includes(response.status)) throw new Error('Failed to register webhook');
 
     const hmacSecret = response.data.data.attributes.hmacSecret;
     if (hmacSecret) {
@@ -204,10 +262,10 @@ async function registerWebhook(locationId, authToken, webhookUrl) {
       console.warn('No HMAC secret returned by the API.');
     }
 
-    const hmacValidUntil = new Date(response.data.data.attributes.validUntil * 1000);
+    const validUntilSec = response.data.data.attributes.validUntil;
+    const hmacValidUntil = new Date(validUntilSec * 1000);
     await setKVValue('hmacSecretValidity', hmacValidUntil.toISOString());
     console.log(`HMAC validity stored. Webhook valid until: ${hmacValidUntil}`);
-
   } catch (error) {
     const errorData = error.response ? error.response.data : error.message;
     console.error('Error registering webhook:', JSON.stringify(errorData, null, 2));
@@ -253,15 +311,11 @@ async function handlePumpState() {
   const deviceStates = JSON.parse(deviceStatesString);
   console.log(`Fetched deviceStates: ${JSON.stringify(deviceStates, null, 2)}`);
 
-  if (!deviceStates[pumpId]) {
-    console.warn(`No state found for pumpId: ${pumpId}. Assuming pump should be closed.`);
-  }
-
   const isAnyValveWatering = valveIds.some((valveId) => {
     const valve = deviceStates[valveId];
-    const isWatering = valve && 
+    const isWatering = valve &&
       (valve.activity?.value === 'MANUAL_WATERING' || valve.activity?.value === 'SCHEDULED_WATERING');
-    
+
     console.log(`Valve ID: ${valveId}, Watering: ${isWatering}`);
     return isWatering;
   });
@@ -272,7 +326,6 @@ async function handlePumpState() {
   console.log('Starting performPumpAction...');
   await performPumpAction(newPumpActionState);
   console.log('Completed performPumpAction...');
-  
   console.log('handlePumpState completed');
 }
 
@@ -294,7 +347,7 @@ async function performPumpAction(actionState) {
   const headers = {
     Accept: 'application/vnd.api+json',
     Authorization: `Bearer ${authToken}`,
-    'X-Api-Key': clientId,  
+    'X-Api-Key': clientId,
     'Content-Type': 'application/vnd.api+json',
   };
 
@@ -304,7 +357,7 @@ async function performPumpAction(actionState) {
       id: 'request-by-script',
       attributes: {
         command: actionState === 'open' ? 'START_SECONDS_TO_OVERRIDE' : 'STOP_UNTIL_NEXT_TASK',
-        ...(actionState === 'open' && { seconds: 3600 }),  
+        ...(actionState === 'open' && { seconds: 3600 }),
       },
     },
   };
@@ -316,7 +369,6 @@ async function performPumpAction(actionState) {
 
   try {
     const response = await axios.put(url, data, { headers });
-
     if (response.status !== 202) {
       console.error('Pump action failed with status:', response.status);
       console.error('Response data:', JSON.stringify(response.data, null, 2));
@@ -333,6 +385,3 @@ async function performPumpAction(actionState) {
     }
   }
 }
-
-module.exports.updateDeviceStates = updateDeviceStates;
-module.exports.handlePumpState = handlePumpState;
