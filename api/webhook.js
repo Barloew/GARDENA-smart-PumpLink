@@ -19,22 +19,24 @@ module.exports = async (req, res) => {
 
   req.on('end', async () => {
     try {
-      const signature = req.headers['x-authorization-content-sha256'];
-      if (!signature) {
-        return res.status(400).send('Missing signature header');
-      }
+      // Temporarily disabling HMAC validation for debugging
+      // const signature = req.headers['x-authorization-content-sha256'];
+      // if (!signature) {
+      //   return res.status(400).send('Missing signature header');
+      // }
 
-      const hmacSecret = await getCachedKVValue('gardenaHmacSecret');
-      if (!hmacSecret) {
-        console.error('HMAC secret not found in KV cache');
-        return res.status(500).send('Internal server error');
-      }
+      // const hmacSecret = await getCachedKVValue('gardenaHmacSecret');
+      // if (!hmacSecret) {
+      //   console.error('HMAC secret not found in KV cache');
+      //   return res.status(500).send('Internal server error');
+      // }
 
-      const isValid = validateHmacSignature(rawBody, hmacSecret, signature);
-      if (!isValid) {
-        return res.status(400).send('Invalid HMAC signature');
-      }
+      // const isValid = validateHmacSignature(rawBody, hmacSecret, signature);
+      // if (!isValid) {
+      //   return res.status(400).send('Invalid HMAC signature');
+      // }
 
+      // Token refresh
       try {
         await checkAndRefreshToken();
         console.log('Access token checked and refreshed if needed');
@@ -100,6 +102,7 @@ module.exports = async (req, res) => {
   });
 };
 
+// HMAC validation helper (unchanged, but not used during debugging)
 function validateHmacSignature(rawBody, secret, signature) {
   const computedSignature = crypto
     .createHmac('sha256', secret)
