@@ -171,7 +171,7 @@ async function getLocationId(accessToken) {
   const CLIENT_ID  = await getKVValue('gardenaClientId');
 
   try {
-    const response = await axios.get(`${SMART_HOST}/v1/locations`, {
+    const response = await axios.get(`${SMART_HOST}/v2/locations`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type':    'application/vnd.api+json',
